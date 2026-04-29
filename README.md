@@ -111,6 +111,39 @@ python scripts/infer_compare.py \
   --out reports/before_after_compare.md
 ```
 
+## 短期情绪记忆模块
+
+项目加入了轻量短期情绪记忆模块，默认文件为 `data/memory/memory.json`。每条记忆包含轮次、情绪、用户表达和助手回复。生成回复前，系统会读取最近 3 轮记忆，把历史情绪趋势拼接到当前 prompt 中。
+
+只查看记忆 prompt，不加载模型：
+
+```bash
+python scripts/memory_chat.py \
+  --dry-run \
+  --user "我最近总觉得自己很失败。" \
+  --scene "家庭陪伴"
+```
+
+手动写入一轮记忆，不加载模型：
+
+```bash
+python scripts/memory_chat.py \
+  --user "今天还行。" \
+  --emotion neutral \
+  --manual-reply "听起来今天比较平稳。"
+```
+
+训练和其他 GPU 任务结束后，可单独加载 adapter 进行带记忆推理：
+
+```bash
+python scripts/memory_chat.py \
+  --adapter outputs/experiments/rank4_steps175 \
+  --user "我最近总觉得自己很失败。" \
+  --scene "家庭陪伴"
+```
+
+模块设计说明见 `reports/memory_module_design.md`。
+
 ## 领域问答对比与消融实验
 
 一键执行完整实验：
