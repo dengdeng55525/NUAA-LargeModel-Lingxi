@@ -1,0 +1,22 @@
+# Large local artifacts
+data/raw/
+data/processed/
+models/
+outputs/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime logs
+*.log
+runs/
+wandb/
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
