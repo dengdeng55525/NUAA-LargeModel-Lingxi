@@ -8,11 +8,6 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
-# Runtime logs
-*.log
-runs/
-wandb/
-
 # OS/editor
 .DS_Store
 .idea/
