@@ -21,6 +21,24 @@ models/                本地模型文件，不提交
 outputs/               LoRA/DPO adapter 与实验产物，运行日志和 checkpoint 不提交
 ```
 
+## 已上传的微调模型
+
+本仓库不上传 `Qwen2.5-1.5B-Instruct` 基座模型，基座模型需要按“下载模型与数据”步骤下载到 `models/Qwen2.5-1.5B-Instruct`。
+
+仓库已通过 Git LFS 上传本项目微调得到的 LoRA/DPO adapter，可直接配合本地基座模型加载：
+
+| 名称 | 路径 | 说明 |
+| --- | --- | --- |
+| SFT 正式版 | `outputs/lingxi-qwen25-1p5b-lora-30min` | 课程主线 LoRA-SFT adapter |
+| DPO policy | `outputs/lingxi-qwen25-1p5b-dpo/policy` | SFT 后继续 DPO 偏好对齐的最终推荐 adapter |
+| rank4_steps175 | `outputs/experiments/rank4_steps175` | rank=4 消融实验 |
+| rank8_steps90 | `outputs/experiments/rank8_steps90` | 短训练步数对照 |
+| rank8_steps175 | `outputs/experiments/rank8_steps175` | rank=8 标准对照 |
+| rank8_steps175_neftune | `outputs/experiments/rank8_steps175_neftune` | NEFTune 训练增强实验 |
+| rank8_steps350 | `outputs/experiments/rank8_steps350` | 更长训练步数对照 |
+| rank16_steps175 | `outputs/experiments/rank16_steps175` | rank=16 高秩对照 |
+| rank16_steps175_rslora | `outputs/experiments/rank16_steps175_rslora` | rsLoRA 秩稳定实验 |
+
 ## 环境安装
 
 当前仓库不固定安装 PyTorch；默认使用机器上已有的 `torch 2.1.2+cu118`。
