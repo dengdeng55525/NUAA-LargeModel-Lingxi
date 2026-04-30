@@ -161,29 +161,30 @@
               <div id="safety-box" class="safety-box chat-safety"></div>
               <div id="chat-thread" class="chat-thread" aria-live="polite"></div>
 
-              <div class="prompt-drawer" id="prompt-drawer" hidden>
-                <div class="prompt-drawer-head">
-                  <h4>当前 Prompt</h4>
-                  <button id="close-prompt" class="icon-button" title="关闭">×</button>
+              <div class="chat-bottom">
+                <div class="prompt-drawer" id="prompt-drawer" hidden>
+                  <div class="prompt-drawer-head">
+                    <h4>当前 Prompt</h4>
+                    <button id="close-prompt" class="icon-button" title="关闭">×</button>
+                  </div>
+                  <pre id="chat-prompt"></pre>
                 </div>
-                <pre id="chat-prompt"></pre>
-              </div>
 
-              <form id="chat-form" class="chat-composer">
-                <textarea id="chat-user" rows="1" placeholder="输入你想说的话，Enter 发送，Shift+Enter 换行">我最近作业太多了，感觉怎么做都做不完，越想越慌。</textarea>
-                <div class="composer-tools">
-                  <button type="button" class="button secondary" data-chat-mode="dry"><span class="icon">▧</span><span>Prompt</span></button>
-                  <button type="button" class="button secondary" id="manual-toggle"><span class="icon">✎</span><span>手动</span></button>
-                  <button type="submit" class="button primary"><span class="icon">▶</span><span>发送</span></button>
+                <div id="manual-panel" class="manual-panel" hidden>
+                  <label class="field compact">
+                    <span>手动回复内容</span>
+                    <textarea id="manual-reply" rows="3">听起来你现在压力很大。我们可以先把任务拆成最小的一步，先完成最容易开始的那一项。</textarea>
+                  </label>
+                  <button class="button secondary" data-chat-mode="manual"><span class="icon">＋</span><span>写入手动回复</span></button>
                 </div>
-              </form>
 
-              <div id="manual-panel" class="manual-panel" hidden>
-                <label class="field compact">
-                  <span>手动回复内容</span>
-                  <textarea id="manual-reply" rows="3">听起来你现在压力很大。我们可以先把任务拆成最小的一步，先完成最容易开始的那一项。</textarea>
-                </label>
-                <button class="button secondary" data-chat-mode="manual"><span class="icon">＋</span><span>写入手动回复</span></button>
+                <form id="chat-form" class="chat-composer">
+                  <textarea id="chat-user" rows="1" placeholder="输入你想说的话，Enter 发送，Shift+Enter 换行"></textarea>
+                  <div class="composer-tools">
+                    <button type="button" class="button secondary" id="manual-toggle"><span class="icon">✎</span><span>手动</span></button>
+                    <button type="submit" class="button primary"><span class="icon">▶</span><span>发送</span></button>
+                  </div>
+                </form>
               </div>
             </article>
           </div>

@@ -331,8 +331,11 @@ function renderDiagnostics(items) {
 function autoResizeComposer() {
   const input = $("#chat-user");
   if (!input) return;
+  const maxHeight = 128;
   input.style.height = "auto";
-  input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
+  const nextHeight = Math.min(input.scrollHeight, maxHeight);
+  input.style.height = `${nextHeight}px`;
+  input.style.overflowY = input.scrollHeight > maxHeight ? "auto" : "hidden";
 }
 
 function formatChatContent(text) {
@@ -713,17 +716,10 @@ async function refreshMemory() {
   renderMemory(data.records);
 }
 
-async function handleChat(mode) {
-  const input = $("#chat-user");
-  const userText = input.value.trim();
-  if (!userText) {
-    toast("请输入内容");
-    return;
-  }
-  $("#safety-box").innerHTML = "";
-  const payload = {
+function chatPayload(mode) {
+  return {
     mode,
-    user_text: userText,
+    user_text: $("#chat-user").value.trim(),
     scene: $("#chat-scene").value,
     emotion: $("#chat-emotion").value,
     adapter: $("#chat-adapter").value,
@@ -732,6 +728,41 @@ async function handleChat(mode) {
     no_save: $("#chat-no-save").checked,
     disable_safety: $("#chat-disable-safety").checked,
   };
+}
+
+async function previewPrompt() {
+  const payload = chatPayload("dry");
+  if (!payload.user_text) {
+    toast("请输入内容");
+    return;
+  }
+  $("#safety-box").innerHTML = "";
+  setChatBusy(true);
+  $("#prompt-drawer").hidden = false;
+  $("#chat-prompt").textContent = "正在构建 Prompt...";
+  try {
+    const data = await api("/api/chat", { method: "POST", body: payload });
+    if (data.safety?.triggered) {
+      $("#safety-box").innerHTML = `<div class="notice ${esc(data.safety.level)}"><strong>安全边界触发：</strong>${esc(
+        data.safety.level
+      )} · ${esc((data.safety.matched_keywords || []).join("、"))}</div>`;
+    }
+    $("#chat-prompt").textContent = data.prompt || "";
+    toast("Prompt 已更新");
+  } finally {
+    setChatBusy(false);
+  }
+}
+
+async function handleChat(mode) {
+  const input = $("#chat-user");
+  const userText = input.value.trim();
+  if (!userText) {
+    toast("请输入内容");
+    return;
+  }
+  $("#safety-box").innerHTML = "";
+  const payload = chatPayload(mode);
   addChatMessage({ role: "user", content: userText, emotion: payload.emotion || "自动识别" });
   addChatMessage({
     role: "assistant",
@@ -928,14 +959,18 @@ function bindEvents() {
     state.chatMessages = [
       {
         role: "assistant",
-        content: "新对话已开始。我仍会使用右侧设置和短期情绪记忆来理解当前表达。",
+        content: "你好，我是灵犀。你可以像聊天一样直接说现在的状态，我会结合短期情绪记忆回应。",
         emotion: "平静",
         mode: "welcome",
       },
     ];
     renderChatThread();
+    $("#chat-user").value = "";
+    autoResizeComposer();
     $("#safety-box").innerHTML = "";
     $("#chat-prompt").textContent = "";
+    $("#prompt-drawer").hidden = true;
+    $("#manual-panel").hidden = true;
     toast("已开启新对话");
   });
   $("#manual-toggle").addEventListener("click", () => {
@@ -943,7 +978,7 @@ function bindEvents() {
   });
   $("#show-prompt").addEventListener("click", async () => {
     try {
-      await handleChat("dry");
+      await previewPrompt();
     } catch (err) {
       toast(err.message);
     }

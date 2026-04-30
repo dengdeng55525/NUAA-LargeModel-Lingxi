@@ -1,8 +1,5 @@
-# Large local artifacts
-data/raw/
-data/processed/
-models/
-outputs/
+# Runtime/private local artifacts
+.codex/
 
 # Python
 __pycache__/
@@ -20,3 +17,6 @@ wandb/
 .DS_Store
 .idea/
 .vscode/
+
+# Base model is downloaded by scripts/download_assets.py
+models/
