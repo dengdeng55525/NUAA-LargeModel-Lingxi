@@ -7,6 +7,7 @@ import os
 import sys
 from pathlib import Path
 
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "max_split_size_mb:128,garbage_collection_threshold:0.8")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 import torch
@@ -17,6 +18,7 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
+from transformers.trainer_utils import get_last_checkpoint
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
@@ -32,6 +34,16 @@ def get_distributed_state() -> tuple[int, int]:
     return local_rank, world_size
 
 
+def rank_log(local_rank: int, message: str) -> None:
+    print(f"[rank {local_rank}] {message}", flush=True)
+
+
+def find_resume_checkpoint(output_dir: str) -> str | None:
+    if not Path(output_dir).exists():
+        return None
+    return get_last_checkpoint(output_dir)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/qwen25_1p5b_qlora.yaml")
@@ -39,7 +51,7 @@ def main() -> int:
     parser.add_argument("--max-train-samples", type=int, default=None)
     parser.add_argument("--max-eval-samples", type=int, default=None)
     parser.add_argument("--output-dir", default=None)
-    parser.add_argument("--allow-cpu", action="store_true")
+    parser.add_argument("--resume-from-checkpoint", default=None)
     args = parser.parse_args()
 
     config = load_yaml(args.config)
@@ -51,10 +63,7 @@ def main() -> int:
         torch.cuda.set_device(local_rank)
 
     if config["model"].get("load_in_4bit", True) and not torch.cuda.is_available():
-        if not args.allow_cpu:
-            raise RuntimeError("CUDA is unavailable. QLoRA 4-bit training requires a visible GPU.")
-        config["model"]["load_in_4bit"] = False
-        training["optim"] = "adamw_torch"
+        raise RuntimeError("CUDA is unavailable. QLoRA 4-bit training requires a visible GPU.")
 
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
@@ -96,6 +105,7 @@ def main() -> int:
         bias="none",
         task_type="CAUSAL_LM",
         target_modules=config["lora"]["target_modules"],
+        use_rslora=config["lora"].get("use_rslora", False),
     )
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
@@ -106,6 +116,7 @@ def main() -> int:
     max_eval_samples = args.max_eval_samples if args.max_eval_samples is not None else training.get("max_eval_samples")
     pretokenize = config["data"].get("pretokenize", False)
 
+    rank_log(local_rank, "building train dataset")
     train_dataset = ChatSFTDataset(
         config["data"]["train_file"],
         tokenizer,
@@ -113,6 +124,8 @@ def main() -> int:
         limit=max_train_samples,
         pretokenize=pretokenize,
     )
+    rank_log(local_rank, f"train dataset ready: {len(train_dataset)}")
+    rank_log(local_rank, "building eval dataset")
     eval_dataset = ChatSFTDataset(
         config["data"]["valid_file"],
         tokenizer,
@@ -120,6 +133,7 @@ def main() -> int:
         limit=max_eval_samples,
         pretokenize=pretokenize,
     )
+    rank_log(local_rank, f"eval dataset ready: {len(eval_dataset)}")
 
     output_dir = str(resolve_path(args.output_dir or training["output_dir"]))
     max_steps = args.max_steps if args.max_steps is not None else training.get("max_steps", -1)
@@ -141,7 +155,7 @@ def main() -> int:
         optim=training.get("optim", "paged_adamw_8bit"),
         lr_scheduler_type=training.get("lr_scheduler_type", "cosine"),
         report_to=training.get("report_to", ["tensorboard"]),
-        evaluation_strategy="steps",
+        eval_strategy="steps",
         save_strategy="steps",
         bf16=torch.cuda.is_available() and torch.cuda.is_bf16_supported(),
         fp16=torch.cuda.is_available() and not torch.cuda.is_bf16_supported(),
@@ -150,7 +164,13 @@ def main() -> int:
         dataloader_pin_memory=training.get("dataloader_pin_memory", True),
         dataloader_persistent_workers=training.get("dataloader_persistent_workers", False)
         and dataloader_num_workers > 0,
-        dataloader_prefetch_factor=training.get("dataloader_prefetch_factor"),
+        dataloader_prefetch_factor=training.get("dataloader_prefetch_factor")
+        if dataloader_num_workers > 0
+        else None,
+        torch_empty_cache_steps=training.get("torch_empty_cache_steps"),
+        eval_accumulation_steps=training.get("eval_accumulation_steps"),
+        gradient_checkpointing_kwargs=training.get("gradient_checkpointing_kwargs"),
+        neftune_noise_alpha=training.get("neftune_noise_alpha"),
         ddp_find_unused_parameters=False if world_size > 1 else None,
         remove_unused_columns=False,
     )
@@ -163,7 +183,13 @@ def main() -> int:
         data_collator=DataCollatorForCausalChat(tokenizer),
         tokenizer=tokenizer,
     )
-    result = trainer.train()
+    resume_from_checkpoint = args.resume_from_checkpoint or training.get("resume_from_checkpoint")
+    if resume_from_checkpoint == "auto":
+        resume_from_checkpoint = find_resume_checkpoint(output_dir)
+        if resume_from_checkpoint is None and trainer.is_world_process_zero():
+            print(f"No checkpoint found in {output_dir}; starting from scratch.")
+    rank_log(local_rank, f"starting trainer.train(resume_from_checkpoint={resume_from_checkpoint})")
+    result = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
     metrics = result.metrics
     eval_metrics = trainer.evaluate()
     metrics.update(eval_metrics)

@@ -6,3 +6,4 @@ lora:
 
 training:
   output_dir: outputs/experiments/rank16_steps175
+  optim: adamw_torch

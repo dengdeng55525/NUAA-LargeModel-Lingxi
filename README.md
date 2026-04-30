@@ -25,10 +25,10 @@ outputs/               LoRA adapter 与训练日志，不提交
 ```bash
 cd /root/LargeModel
 python -m pip install -r requirements.txt
-python scripts/check_env.py --allow-no-cuda
+python scripts/check_env.py
 ```
 
-如果 `CUDA available: False`，可以处理数据和做脚本检查，但不能正式跑 QLoRA 训练。
+如果 `CUDA available: False`，说明当前环境不满足本项目训练要求。
 
 ## 下载模型与数据
 
@@ -115,7 +115,7 @@ python scripts/infer_compare.py \
 
 项目加入了轻量短期情绪记忆模块，默认文件为 `data/memory/memory.json`。每条记忆包含轮次、情绪、用户表达和助手回复。生成回复前，系统会读取最近 3 轮记忆，把历史情绪趋势拼接到当前 prompt 中。
 
-只查看记忆 prompt，不加载模型：
+调试记忆 prompt：
 
 ```bash
 python scripts/memory_chat.py \
@@ -124,7 +124,7 @@ python scripts/memory_chat.py \
   --scene "家庭陪伴"
 ```
 
-手动写入一轮记忆，不加载模型：
+手动写入一轮记忆：
 
 ```bash
 python scripts/memory_chat.py \
@@ -133,7 +133,7 @@ python scripts/memory_chat.py \
   --manual-reply "听起来今天比较平稳。"
 ```
 
-训练和其他 GPU 任务结束后，可单独加载 adapter 进行带记忆推理：
+可单独加载 adapter 进行带记忆推理：
 
 ```bash
 python scripts/memory_chat.py \
@@ -143,6 +143,29 @@ python scripts/memory_chat.py \
 ```
 
 模块设计说明见 `reports/memory_module_design.md`。
+
+## 安全边界与拒答机制
+
+项目加入了简单规则安全模块，位置为 `src/lingxi/safety.py`。当用户输入包含自伤、自杀、伤害别人、极端痛苦、长期失眠、吃药、诊断、抑郁症等高风险表达时，`memory_chat.py` 会优先输出安全边界回复，不进入普通陪聊生成流程。
+
+示例：
+
+```bash
+python scripts/memory_chat.py \
+  --user "我真的撑不下去了，觉得消失了也没关系。" \
+  --no-save
+```
+
+如果只想调试模型原始 prompt，可显式关闭安全模块：
+
+```bash
+python scripts/memory_chat.py \
+  --disable-safety \
+  --dry-run \
+  --user "我是不是抑郁症，要不要吃药？"
+```
+
+模块设计说明见 `reports/safety_boundary_design.md`。
 
 ## 领域问答对比与消融实验
 
@@ -157,14 +180,10 @@ bash scripts/run_domain_experiments.sh
 - 重新构建轻量指令数据集。
 - 训练 rank4、rank8、rank16 三组 LoRA adapter。
 - 训练 rank8 的 90、175、350 step，用于分析训练步数/轮数影响。
+- 训练 `rank8_steps175_neftune`，用于分析 NEFTune embedding 噪声增强效果。
+- 训练 `rank16_steps175_rslora`，用于分析 rsLoRA 在较高 rank 下的稳定性改进。
 - 在 `examples/eval_prompts.jsonl` 上对比基础模型和各 LoRA adapter 的领域问答回复。
 - 生成 `reports/domain_qa_eval.md` 和 `reports/hyperparameter_analysis.md`。
-
-如果 adapter 已经训练完成，只想重新评测和生成报告：
-
-```bash
-RUN_TRAIN=0 bash scripts/run_domain_experiments.sh
-```
 
 单独运行领域问答前后对比：
 
@@ -184,6 +203,97 @@ python scripts/summarize_experiments.py \
   --eval-json reports/domain_qa_eval.json \
   --out reports/hyperparameter_analysis.md
 ```
+
+## 二阶段 DPO 偏好对齐
+
+在 LoRA-SFT 之后，可以继续执行 DPO 偏好对齐，作为课程加分实验：
+
+```bash
+bash scripts/run_dpo_pipeline.sh
+```
+
+该脚本会完成：
+
+- 构造 400 条 `prompt/chosen/rejected` 偏好数据。
+- 从一阶段 SFT adapter `outputs/lingxi-qwen25-1p5b-lora-30min` 继续训练 DPO。
+- 对比基础模型、SFT adapter、DPO adapter 的领域问答表现。
+- 生成 `reports/dpo_domain_qa_eval.md` 和 `reports/dpo_alignment_report.md`。
+
+单独构造 DPO 数据：
+
+```bash
+python scripts/build_dpo_dataset.py --max-samples 400
+```
+
+单独训练 DPO：
+
+```bash
+accelerate launch --num_processes 1 --mixed_precision bf16 \
+  --main_process_port 0 \
+  scripts/train_dpo.py --config configs/dpo/qwen25_1p5b_dpo.yaml
+```
+
+本项目当前不输出机器人动作建议，因此 DPO 偏好数据聚焦于共情性、相关性、安全性、非诊断边界和情绪适配。
+
+## Web 前端控制台
+
+项目提供了一个本地 Web 控制台，把环境状态、数据集、训练任务、领域问答评测、DPO、短期记忆、安全边界和报告查看统一到页面中。
+
+启动：
+
+```bash
+python webapp/server.py --host 127.0.0.1 --port 7860
+```
+
+打开：
+
+```text
+http://127.0.0.1:7860
+```
+
+控制台中的训练按钮会直接调用本仓库已有脚本；SFT 和 LoRA 消融按项目默认配置使用 GPU，DPO 按当前稳定配置使用单 GPU 并保持有效 batch 不变。
+
+## NEFTune 训练增强
+
+本项目加入 NEFTune 作为低成本训练增强实验。NEFTune 在指令微调阶段向 embedding 加入轻微噪声，不需要额外数据，适合缓解小规模情绪陪伴数据带来的过拟合和模板化回复问题。
+
+NEFTune 实验默认随 `bash scripts/run_domain_experiments.sh` 使用双卡 GPU 训练。
+
+对应配置：
+
+```text
+configs/experiments/qwen25_1p5b_lora_rank8_steps175_neftune.yaml
+```
+
+核心参数：
+
+```yaml
+training:
+  neftune_noise_alpha: 5
+```
+
+对照组是普通 `rank8_steps175`，实验组是 `rank8_steps175_neftune`。运行 `bash scripts/run_domain_experiments.sh` 后会默认启动 GPU 训练，并在 `reports/hyperparameter_analysis.md` 自动生成 NEFTune 对比小节。
+
+## rsLoRA 秩稳定 LoRA
+
+本项目加入 rsLoRA 作为 LoRA 改进实验。rsLoRA 改进了不同 rank 设置下的缩放方式，适合观察较高 rank 时训练稳定性和领域问答表现是否优于普通 LoRA。
+
+对应配置：
+
+```text
+configs/experiments/qwen25_1p5b_lora_rank16_steps175_rslora.yaml
+```
+
+核心参数：
+
+```yaml
+lora:
+  r: 16
+  alpha: 32
+  use_rslora: true
+```
+
+对照组是普通 `rank16_steps175`，实验组是 `rank16_steps175_rslora`。运行 `bash scripts/run_domain_experiments.sh` 后，`reports/hyperparameter_analysis.md` 会自动生成 rsLoRA 对比小节。
 
 ## 旧版消融入口
 

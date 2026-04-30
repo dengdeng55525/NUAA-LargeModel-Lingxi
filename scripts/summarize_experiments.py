@@ -48,8 +48,10 @@ def collect_config_row(config_path: Path, eval_scores: dict[str, dict[str, Any]]
         "output_dir": output_dir,
         "rank": lora.get("r"),
         "alpha": lora.get("alpha"),
+        "use_rslora": lora.get("use_rslora", False),
         "max_steps": training.get("max_steps"),
         "epochs": training.get("num_train_epochs"),
+        "neftune_noise_alpha": training.get("neftune_noise_alpha"),
         "trainable_note": "LoRA adapter",
         "train_loss": metrics.get("train_loss"),
         "eval_loss": metrics.get("eval_loss"),
@@ -78,8 +80,23 @@ def best_row(rows: list[dict[str, Any]], key: str, lower_is_better: bool = False
 
 
 def write_markdown(rows: list[dict[str, Any]], path: Path) -> None:
-    rank_rows = [row for row in rows if row.get("max_steps") == 175]
-    step_rows = [row for row in rows if row.get("rank") == 8]
+    vanilla_rows = [
+        row
+        for row in rows
+        if not row.get("neftune_noise_alpha") and not row.get("use_rslora")
+    ]
+    rank_rows = [row for row in vanilla_rows if row.get("max_steps") == 175]
+    step_rows = [row for row in vanilla_rows if row.get("rank") == 8]
+    neftune_rows = [
+        row
+        for row in rows
+        if row.get("rank") == 8 and row.get("max_steps") == 175
+    ]
+    rslora_rows = [
+        row
+        for row in rows
+        if row.get("rank") == 16 and row.get("max_steps") == 175 and not row.get("neftune_noise_alpha")
+    ]
     best_domain = best_row(rows, "domain_score")
     best_ppl = best_row(rows, "perplexity", lower_is_better=True)
 
@@ -90,19 +107,21 @@ def write_markdown(rows: list[dict[str, Any]], path: Path) -> None:
         "",
         "## 实验结果表",
         "",
-        "| 实验 | Rank | Alpha | Steps | Epochs | Train loss | Eval loss | PPL | Step/s | 领域分 | 危机通过率 | 状态 |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| 实验 | Rank | Alpha | rsLoRA | Steps | Epochs | NEFTune | Train loss | Eval loss | PPL | Step/s | 领域分 | 危机通过率 | 状态 |",
+        "| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for row in rows:
         safety = row.get("safety_pass_rate")
         safety_text = "" if safety is None else f"{safety:.2%}"
         lines.append(
-            "| {label} | {rank} | {alpha} | {steps} | {epochs} | {train_loss} | {eval_loss} | {ppl} | {step_s} | {domain} | {safety} | {status} |".format(
+            "| {label} | {rank} | {alpha} | {rslora} | {steps} | {epochs} | {neftune} | {train_loss} | {eval_loss} | {ppl} | {step_s} | {domain} | {safety} | {status} |".format(
                 label=row["label"],
                 rank=fmt(row.get("rank")),
                 alpha=fmt(row.get("alpha")),
+                rslora="是" if row.get("use_rslora") else "",
                 steps=fmt(row.get("max_steps")),
                 epochs=fmt(row.get("epochs")),
+                neftune=fmt(row.get("neftune_noise_alpha")),
                 train_loss=fmt(row.get("train_loss")),
                 eval_loss=fmt(row.get("eval_loss")),
                 ppl=fmt(row.get("perplexity")),
@@ -134,6 +153,31 @@ def write_markdown(rows: list[dict[str, Any]], path: Path) -> None:
         lines.append("结论写法建议：90 step 可作为欠训练参考，175 step 约等于当前数据一轮，350 step 约等于两轮。若 350 step 的训练 loss 下降但 eval loss/领域分无改善，应解释为小数据集上继续训练可能出现过拟合。")
     else:
         lines.append("尚未找到训练步数对比实验结果。")
+
+    lines.extend(["", "## NEFTune 影响", ""])
+    if neftune_rows:
+        lines.append("固定 rank=8、175 step，比较普通 LoRA-SFT 与 LoRA-SFT + NEFTune：")
+        for row in sorted(neftune_rows, key=lambda item: item.get("neftune_noise_alpha") or 0):
+            neftune = row.get("neftune_noise_alpha")
+            method = "LoRA-SFT + NEFTune" if neftune else "LoRA-SFT"
+            lines.append(
+                f"- `{row['label']}`：方法={method}，NEFTune alpha={fmt(neftune)}，eval loss={fmt(row.get('eval_loss'))}，PPL={fmt(row.get('perplexity'))}，领域分={fmt(row.get('domain_score'))}。"
+            )
+        lines.append("结论写法建议：如果加入 NEFTune 后领域分、回复多样性或安全样本表现提升，可解释为 embedding 噪声缓解了小数据集微调的模板化问题；如果 eval loss 略有波动但问答质量更好，应优先结合具体回复案例分析。")
+    else:
+        lines.append("尚未找到 NEFTune 对比实验结果。")
+
+    lines.extend(["", "## rsLoRA 影响", ""])
+    if rslora_rows:
+        lines.append("固定 rank=16、175 step，比较普通 LoRA 与 Rank-Stabilized LoRA：")
+        for row in sorted(rslora_rows, key=lambda item: bool(item.get("use_rslora"))):
+            method = "rsLoRA" if row.get("use_rslora") else "LoRA"
+            lines.append(
+                f"- `{row['label']}`：方法={method}，rank={row.get('rank')}，alpha={row.get('alpha')}，eval loss={fmt(row.get('eval_loss'))}，PPL={fmt(row.get('perplexity'))}，领域分={fmt(row.get('domain_score'))}。"
+            )
+        lines.append("结论写法建议：如果 rsLoRA 在 rank=16 下相比普通 LoRA 的 eval loss 更低或领域分更高，可说明秩稳定缩放改善了较高 rank 设置下的训练稳定性；如果差异不大，也可说明当前数据规模较小，rank=16 已接近收益上限。")
+    else:
+        lines.append("尚未找到 rsLoRA 对比实验结果。")
 
     lines.extend(["", "## 推荐结论", ""])
     if best_domain:

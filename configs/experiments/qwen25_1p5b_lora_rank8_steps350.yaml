@@ -4,4 +4,4 @@ training:
   output_dir: outputs/experiments/rank8_steps350
   max_steps: 350
   num_train_epochs: 2
-  save_steps: 350
+  save_steps: 50

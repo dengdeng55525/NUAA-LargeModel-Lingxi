@@ -50,7 +50,7 @@
 
 ## 使用方式
 
-只查看拼接后的 prompt，不加载模型：
+调试拼接后的 prompt：
 
 ```bash
 python scripts/memory_chat.py \
@@ -59,7 +59,7 @@ python scripts/memory_chat.py \
   --scene "家庭陪伴"
 ```
 
-手动写入一轮记忆，不加载模型：
+手动写入一轮记忆：
 
 ```bash
 python scripts/memory_chat.py \

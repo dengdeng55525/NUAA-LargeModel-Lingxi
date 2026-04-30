@@ -38,7 +38,6 @@ def package_available(name: str) -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/qwen25_1p5b_qlora.yaml")
-    parser.add_argument("--allow-no-cuda", action="store_true")
     args = parser.parse_args()
 
     config = load_yaml(args.config)
@@ -67,7 +66,7 @@ def main() -> int:
 
     if missing:
         return 2
-    if not torch.cuda.is_available() and not args.allow_no_cuda:
+    if not torch.cuda.is_available():
         print("CUDA is not available. Formal QLoRA training is blocked.")
         return 3
     return 0

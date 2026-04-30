@@ -6,6 +6,7 @@ from typing import Any
 
 from .constants import EMOTION_KEYWORDS, SYSTEM_PROMPT
 from .io_utils import resolve_path
+from .safety import is_high_risk
 
 
 EMOTION_ALIASES = {
@@ -25,9 +26,6 @@ EMOTION_ALIASES = {
     "risk": "危机",
 }
 
-CRISIS_KEYWORDS = ("自杀", "伤害自己", "不想活", "消失", "结束生命", "撑不下去")
-
-
 def normalize_emotion(value: str | None) -> str:
     if not value:
         return "平静"
@@ -45,7 +43,7 @@ def normalize_emotion(value: str | None) -> str:
 
 def infer_emotion(text: str, fallback: str | None = None) -> str:
     normalized = text or ""
-    if any(keyword in normalized for keyword in CRISIS_KEYWORDS):
+    if is_high_risk(normalized):
         return "危机"
     for emotion, keywords in EMOTION_KEYWORDS.items():
         if any(keyword in normalized for keyword in keywords):
