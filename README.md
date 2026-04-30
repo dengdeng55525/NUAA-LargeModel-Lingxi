@@ -14,10 +14,11 @@ scripts/               下载、数据处理、训练、推理对比入口
 src/lingxi/            项目核心 Python 模块
 examples/              评测提示词和小样例
 reports/               生成的实验对比报告
-data/raw/              原始数据集，本地生成，不提交
-data/processed/        处理后的指令数据，本地生成，不提交
+data/raw/              原始数据集
+data/processed/        处理后的指令数据
+data/memory/           本地短期记忆，memory.json 不提交
 models/                本地模型文件，不提交
-outputs/               LoRA adapter 与训练日志，不提交
+outputs/               LoRA/DPO adapter 与实验产物，运行日志和 checkpoint 不提交
 ```
 
 ## 环境安装
@@ -116,6 +117,8 @@ python scripts/infer_compare.py \
 ## 短期情绪记忆模块
 
 项目加入了轻量短期情绪记忆模块，默认文件为 `data/memory/memory.json`。每条记忆包含轮次、情绪、用户表达和助手回复。生成回复前，系统会读取最近 3 轮记忆，把历史情绪趋势拼接到当前 prompt 中。
+
+`data/memory/memory.json` 属于本地运行时状态，可能包含用户对话内容，不提交到 Git。仓库只保留 `data/memory/memory.example.json` 作为格式示例。
 
 前端聊天页已接入实时推理流程。点击“发送”后，界面会逐步显示输入接收、情绪识别、安全检查、记忆检索、Prompt 构建、模型加载、token 生成和记忆刷新等阶段；模型生成时会实时追加输出内容，不再需要静态等待完整回复。
 

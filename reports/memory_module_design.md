@@ -10,6 +10,8 @@
 
 默认文件为 `data/memory/memory.json`：
 
+该文件是本地运行时状态，可能包含用户对话内容，因此不纳入 Git 版本管理。仓库中仅保留 `data/memory/memory.example.json` 作为格式示例。
+
 ```json
 [
   {

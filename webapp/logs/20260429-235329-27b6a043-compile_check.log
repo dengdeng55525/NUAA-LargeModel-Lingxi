@@ -1,2 +1,0 @@
-$ python -m py_compile scripts/train_lora.py scripts/train_dpo.py scripts/evaluate_domain_qa.py scripts/summarize_experiments.py scripts/summarize_dpo_alignment.py webapp/server.py
-

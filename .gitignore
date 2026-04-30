@@ -1,5 +1,9 @@
 # Runtime/private local artifacts
 .codex/
+data/memory/memory.json
+webapp/logs/
+outputs/**/runs/
+outputs/**/checkpoint-*/
 
 # Python
 __pycache__/
