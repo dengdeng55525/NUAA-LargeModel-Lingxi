@@ -145,6 +145,8 @@ select:disabled {
 
 .workspace {
   min-width: 0;
+  height: 100vh;
+  overflow: auto;
   padding: 0 24px 24px;
   background: var(--bg);
 }
@@ -637,8 +639,9 @@ pre {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
   gap: 0;
-  height: calc(100vh - 86px);
-  min-height: 700px;
+  height: calc(100dvh - 106px);
+  min-height: 0;
+  max-height: calc(100dvh - 106px);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
@@ -652,12 +655,14 @@ pre {
 }
 
 .chat-side {
-  display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   background: var(--surface-2);
   border: 0;
   border-right: 1px solid var(--line);
   border-radius: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .chat-settings {
@@ -665,13 +670,15 @@ pre {
   gap: 12px;
   padding: 14px;
   border-bottom: 1px solid var(--line);
-  max-height: 310px;
-  overflow: auto;
+  max-height: none;
+  overflow: visible;
+  flex: none;
 }
 
 .memory-visual {
   padding: 14px;
   border-bottom: 1px solid var(--line);
+  flex: none;
 }
 
 .memory-visual-head,
@@ -694,9 +701,9 @@ pre {
 
 .memory-summary {
   min-height: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  overflow: hidden;
+  display: block;
+  overflow: visible;
+  flex: none;
 }
 
 .memory-summary h4 {
@@ -706,7 +713,7 @@ pre {
 .compact-timeline {
   padding: 10px 14px 14px;
   min-height: 0;
-  overflow: auto;
+  overflow: visible;
 }
 
 .compact-timeline .memory-item {
@@ -724,6 +731,9 @@ pre {
   background: var(--surface);
   border: 0;
   border-radius: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .chat-header {
@@ -770,6 +780,7 @@ pre {
   flex-direction: column;
   gap: 20px;
   background: var(--surface);
+  overscroll-behavior: contain;
 }
 
 .chat-message {
@@ -937,6 +948,7 @@ pre {
   align-items: center;
   max-height: min(38vh, 360px);
   overflow: hidden;
+  z-index: 2;
 }
 
 .prompt-drawer,
@@ -1183,7 +1195,6 @@ pre {
 @media (max-width: 1180px) {
   .overview-grid,
   .split-grid,
-  .chatgpt-shell,
   .reports-grid,
   .data-grid,
   .jobs-grid {
@@ -1191,17 +1202,19 @@ pre {
   }
 
   .chatgpt-shell {
-    height: auto;
+    grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
+    height: calc(100dvh - 106px);
+    max-height: calc(100dvh - 106px);
   }
 
   .chat-side,
   .chat-main {
-    min-height: 620px;
+    min-height: 0;
   }
 
   .chat-side {
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
+    border-right: 1px solid var(--line);
+    border-bottom: 0;
   }
 
   .command-grid {
@@ -1212,6 +1225,7 @@ pre {
 @media (max-width: 760px) {
   .app-shell {
     grid-template-columns: 1fr;
+    min-height: 100dvh;
   }
 
   .sidebar {
@@ -1224,6 +1238,9 @@ pre {
   }
 
   .workspace {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
     padding: 0 14px 14px;
   }
 
@@ -1245,6 +1262,24 @@ pre {
   .chat-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .chatgpt-shell {
+    grid-template-columns: 1fr;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .chat-side {
+    max-height: 360px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .chat-main {
+    height: min(720px, calc(100dvh - 120px));
+    min-height: 560px;
   }
 
   .chat-message,
