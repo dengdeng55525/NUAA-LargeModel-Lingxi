@@ -283,8 +283,10 @@ function renderChatThread() {
       const meta = [message.emotion, message.mode === "safety" ? "安全边界" : "", message.mode === "manual" ? "手动写入" : ""]
         .filter(Boolean)
         .join(" · ");
+      const stages = renderProcessStages(message.stages || [], message.streaming);
+      const diagnostics = renderDiagnostics(message.diagnostics || []);
       return `
-        <div class="chat-message ${message.role}">
+        <div class="chat-message ${message.role} ${message.streaming ? "streaming" : ""}">
           <div class="avatar ${message.role}">${message.role === "user" ? "你" : "LX"}</div>
           <div class="bubble ${message.role}">
             <div class="bubble-meta">
@@ -292,11 +294,38 @@ function renderChatThread() {
               ${meta ? `<span>${esc(meta)}</span>` : ""}
             </div>
             <div class="bubble-content">${formatChatContent(message.content)}</div>
+            ${stages}
+            ${diagnostics}
           </div>
         </div>`;
     })
     .join("");
   thread.scrollTop = thread.scrollHeight;
+}
+
+function renderProcessStages(stages, streaming) {
+  if (!stages.length) return "";
+  return `
+    <div class="process-rail">
+      ${stages
+        .map(
+          (stage, index) => `
+            <div class="process-step ${index === stages.length - 1 && streaming ? "active" : "done"}">
+              <span class="process-dot"></span>
+              <span class="process-text"><b>${esc(stage.title || stage.key || "处理")}</b>${stage.detail ? ` · ${esc(stage.detail)}` : ""}</span>
+            </div>`
+        )
+        .join("")}
+    </div>`;
+}
+
+function renderDiagnostics(items) {
+  if (!items.length) return "";
+  return `
+    <details class="diagnostics">
+      <summary>推理诊断 ${items.length}</summary>
+      <pre>${esc(items.slice(-12).join("\n"))}</pre>
+    </details>`;
 }
 
 function autoResizeComposer() {
@@ -326,6 +355,100 @@ function setLastAssistantContent(content, patch = {}) {
       return;
     }
   }
+}
+
+function patchLastAssistant(patch = {}) {
+  for (let i = state.chatMessages.length - 1; i >= 0; i -= 1) {
+    if (state.chatMessages[i].role === "assistant") {
+      state.chatMessages[i] = { ...state.chatMessages[i], ...patch };
+      renderChatThread();
+      return state.chatMessages[i];
+    }
+  }
+  return null;
+}
+
+function appendLastAssistantStage(stage) {
+  for (let i = state.chatMessages.length - 1; i >= 0; i -= 1) {
+    if (state.chatMessages[i].role === "assistant") {
+      const stages = [...(state.chatMessages[i].stages || []), stage];
+      state.chatMessages[i] = { ...state.chatMessages[i], stages };
+      renderChatThread();
+      return;
+    }
+  }
+}
+
+function appendLastAssistantDiagnostic(text) {
+  for (let i = state.chatMessages.length - 1; i >= 0; i -= 1) {
+    if (state.chatMessages[i].role === "assistant") {
+      const diagnostics = [...(state.chatMessages[i].diagnostics || []), text].slice(-40);
+      state.chatMessages[i] = { ...state.chatMessages[i], diagnostics };
+      renderChatThread();
+      return;
+    }
+  }
+}
+
+function setChatBusy(busy) {
+  state.chatBusy = busy;
+  ["#chat-user", "#show-prompt", "#manual-toggle", "#new-chat"].forEach((selector) => {
+    const el = $(selector);
+    if (el) el.disabled = busy;
+  });
+  $$("[data-chat-mode], #chat-form button[type='submit']").forEach((btn) => {
+    btn.disabled = busy;
+  });
+}
+
+function parseSseBlock(block) {
+  let event = "message";
+  const dataLines = [];
+  block.split(/\r?\n/).forEach((line) => {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+  });
+  const dataText = dataLines.join("\n");
+  let data = {};
+  if (dataText) {
+    try {
+      data = JSON.parse(dataText);
+    } catch {
+      data = { raw: dataText };
+    }
+  }
+  return { event, data };
+}
+
+async function streamApi(path, payload, onEvent) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+  if (!res.body) throw new Error("当前浏览器不支持流式读取");
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let index = buffer.indexOf("\n\n");
+    while (index >= 0) {
+      const block = buffer.slice(0, index).trim();
+      buffer = buffer.slice(index + 2);
+      if (block) onEvent(parseSseBlock(block));
+      index = buffer.indexOf("\n\n");
+    }
+  }
+  const rest = buffer.trim();
+  if (rest) onEvent(parseSseBlock(rest));
 }
 
 function drawMemoryCanvas(records) {
@@ -609,35 +732,67 @@ async function handleChat(mode) {
     no_save: $("#chat-no-save").checked,
     disable_safety: $("#chat-disable-safety").checked,
   };
-  if (mode !== "dry") {
-    addChatMessage({ role: "user", content: userText, emotion: payload.emotion || "自动识别" });
-    addChatMessage({
-      role: "assistant",
-      content: mode === "generate" ? "正在生成回复..." : "正在写入手动回复...",
-      emotion: "处理中",
-      mode,
+  addChatMessage({ role: "user", content: userText, emotion: payload.emotion || "自动识别" });
+  addChatMessage({
+    role: "assistant",
+    content: mode === "dry" ? "正在构建 Prompt..." : mode === "manual" ? "正在写入手动回复..." : "正在准备推理...",
+    emotion: "处理中",
+    mode,
+    streaming: true,
+    stages: [],
+    diagnostics: [],
+  });
+
+  let streamedReply = "";
+  let finalData = null;
+  setChatBusy(true);
+  try {
+    await streamApi("/api/chat/stream", payload, ({ event, data }) => {
+      if (event === "stage") {
+        appendLastAssistantStage(data);
+        if (!streamedReply && mode !== "dry") {
+          patchLastAssistant({ content: data.title || "正在处理..." });
+        }
+      } else if (event === "safety") {
+        if (data.triggered) {
+          $("#safety-box").innerHTML = `<div class="notice ${esc(data.level)}"><strong>安全边界触发：</strong>${esc(
+            data.level
+          )} · ${esc((data.matched_keywords || []).join("、"))}</div>`;
+        }
+      } else if (event === "prompt") {
+        $("#chat-prompt").textContent = data.prompt || "";
+        patchLastAssistant({ emotion: data.emotion || payload.emotion || "平静" });
+        if (mode === "dry") {
+          patchLastAssistant({ content: data.prompt || "", mode: "dry" });
+          $("#prompt-drawer").hidden = false;
+        }
+      } else if (event === "token") {
+        streamedReply += data.text || "";
+        patchLastAssistant({ content: streamedReply || "正在生成回复..." });
+      } else if (event === "diagnostic") {
+        appendLastAssistantDiagnostic(data.text || data.raw || "");
+      } else if (event === "final") {
+        finalData = data;
+        patchLastAssistant({
+          content: data.reply || streamedReply || "",
+          emotion: data.emotion || payload.emotion || "平静",
+          mode: data.mode || mode,
+          streaming: false,
+        });
+        renderMemory(data.records || []);
+      } else if (event === "error") {
+        throw new Error(data.error || data.raw || "流式推理失败");
+      }
     });
+  } finally {
+    setChatBusy(false);
   }
-  const data = await api("/api/chat", { method: "POST", body: payload });
-  if (data.safety?.triggered) {
-    $("#safety-box").innerHTML = `<div class="notice ${esc(data.safety.level)}"><strong>安全边界触发：</strong>${esc(
-      data.safety.level
-    )} · ${esc((data.safety.matched_keywords || []).join("、"))}</div>`;
-  }
-  $("#chat-prompt").textContent = data.prompt || "";
-  if (mode === "dry") {
-    addChatMessage({ role: "user", content: userText, emotion: data.emotion || payload.emotion || "自动识别" });
-    addChatMessage({ role: "assistant", content: data.prompt || "", emotion: data.emotion, mode: "dry" });
-    $("#prompt-drawer").hidden = false;
-  } else {
-    setLastAssistantContent(data.reply || "", {
-      emotion: data.emotion || payload.emotion || "平静",
-      mode: data.mode || mode,
-    });
+
+  patchLastAssistant({ streaming: false });
+  if (finalData && mode !== "dry") {
     input.value = "";
     autoResizeComposer();
   }
-  renderMemory(data.records || []);
   toast(mode === "dry" ? "Prompt 已生成" : "对话完成");
 }
 

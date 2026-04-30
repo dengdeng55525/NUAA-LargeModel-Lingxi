@@ -52,6 +52,14 @@ button {
   cursor: pointer;
 }
 
+button:disabled,
+textarea:disabled,
+input:disabled,
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .app-shell {
   min-height: 100vh;
   display: grid;
@@ -835,6 +843,82 @@ pre {
 
 .bubble-content p:last-child {
   margin-bottom: 0;
+}
+
+.chat-message.streaming .avatar {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.process-rail {
+  margin-top: 12px;
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.process-step {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.process-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.process-step.done .process-dot {
+  background: var(--accent);
+}
+
+.process-step.active .process-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+.process-text {
+  overflow-wrap: anywhere;
+}
+
+.process-text b {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.diagnostics {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.diagnostics summary {
+  cursor: pointer;
+}
+
+.diagnostics pre {
+  margin-top: 8px;
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
 }
 
 .prompt-drawer {

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -72,6 +73,51 @@ def generate_reply(model: Any, tokenizer: Any, messages: list[dict[str, str]], m
     return tokenizer.decode(generated, skip_special_tokens=True).strip()
 
 
+def emit_jsonl(event: str, **payload: Any) -> None:
+    print(json.dumps({"event": event, **payload}, ensure_ascii=False), flush=True)
+
+
+def stream_generate_reply(
+    model: Any,
+    tokenizer: Any,
+    messages: list[dict[str, str]],
+    max_new_tokens: int,
+) -> str:
+    import torch
+    from transformers import TextIteratorStreamer
+
+    text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    inputs = tokenizer(text, return_tensors="pt").to(input_device(model))
+    streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
+    errors: list[BaseException] = []
+
+    def run_generation() -> None:
+        try:
+            with torch.no_grad():
+                model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=False,
+                    repetition_penalty=1.05,
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
+                    streamer=streamer,
+                )
+        except BaseException as exc:  # noqa: BLE001 - surfaced to the streaming caller.
+            errors.append(exc)
+
+    worker = threading.Thread(target=run_generation, daemon=True)
+    worker.start()
+    chunks: list[str] = []
+    for chunk in streamer:
+        chunks.append(chunk)
+        emit_jsonl("token", text=chunk)
+    worker.join()
+    if errors:
+        raise errors[0]
+    return "".join(chunks).strip()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--memory-file", default="data/memory/memory.json")
@@ -84,6 +130,7 @@ def main() -> int:
     parser.add_argument("--max-new-tokens", type=int, default=220)
     parser.add_argument("--manual-reply", default=None, help="Use this reply instead of loading a model.")
     parser.add_argument("--dry-run", action="store_true", help="Print the memory prompt without loading a model.")
+    parser.add_argument("--stream-jsonl", action="store_true", help="Emit JSONL stage/token events instead of plain text.")
     parser.add_argument("--disable-safety", action="store_true")
     parser.add_argument("--no-save", action="store_true")
     parser.add_argument("--show-memory", action="store_true")
@@ -113,13 +160,23 @@ def main() -> int:
     safety_result = check_safety(user_text)
     if safety_result.triggered and not args.disable_safety:
         reply = safety_result.reply
-        print(reply)
-        print(
-            "\nSafety boundary triggered: "
-            f"level={safety_result.level}; "
-            f"categories={','.join(safety_result.categories)}; "
-            f"keywords={','.join(safety_result.matched_keywords)}"
-        )
+        if args.stream_jsonl:
+            emit_jsonl(
+                "safety",
+                triggered=True,
+                level=safety_result.level,
+                categories=safety_result.categories,
+                matched_keywords=safety_result.matched_keywords,
+            )
+            emit_jsonl("final", reply=reply)
+        else:
+            print(reply)
+            print(
+                "\nSafety boundary triggered: "
+                f"level={safety_result.level}; "
+                f"categories={','.join(safety_result.categories)}; "
+                f"keywords={','.join(safety_result.matched_keywords)}"
+            )
         if not args.no_save:
             record = append_memory(
                 memory_path,
@@ -140,23 +197,37 @@ def main() -> int:
     )
 
     if args.dry_run:
-        print(build_memory_prompt(
+        prompt = build_memory_prompt(
             user_text=user_text,
             scene=args.scene,
             current_emotion=current_emotion,
             records=records,
             window=args.window,
-        ))
+        )
+        if args.stream_jsonl:
+            emit_jsonl("prompt", prompt=prompt, emotion=current_emotion)
+            emit_jsonl("final", reply=prompt)
+        else:
+            print(prompt)
         return 0
 
     if args.manual_reply is not None:
         reply = args.manual_reply
     else:
         adapter_path = resolve_path(args.adapter) if args.adapter else None
+        if args.stream_jsonl:
+            emit_jsonl("stage", key="load_model", title="加载基础模型与 Adapter", detail=str(adapter_path) if adapter_path else "基础模型")
         model, tokenizer = load_model(resolve_path(args.model), adapter_path)
-        reply = generate_reply(model, tokenizer, messages, args.max_new_tokens)
+        if args.stream_jsonl:
+            emit_jsonl("stage", key="generate", title="模型开始生成", detail=f"max_new_tokens={args.max_new_tokens}")
+            reply = stream_generate_reply(model, tokenizer, messages, args.max_new_tokens)
+        else:
+            reply = generate_reply(model, tokenizer, messages, args.max_new_tokens)
 
-    print(reply)
+    if args.stream_jsonl:
+        emit_jsonl("final", reply=reply)
+    else:
+        print(reply)
     if not args.no_save:
         record = append_memory(
             memory_path,

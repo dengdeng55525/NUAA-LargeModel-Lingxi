@@ -5,6 +5,7 @@ import argparse
 import json
 import mimetypes
 import os
+import queue
 import signal
 import subprocess
 import sys
@@ -575,6 +576,21 @@ class LingxiHandler(BaseHTTPRequestHandler):
     def write_error(self, status: int, message: str) -> None:
         self.write_json({"error": message}, status=status)
 
+    def write_sse_headers(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        self.close_connection = True
+
+    def send_sse(self, event: str, payload: dict[str, Any]) -> None:
+        data = json.dumps(payload, ensure_ascii=False)
+        packet = f"event: {event}\ndata: {data}\n\n".encode("utf-8")
+        self.wfile.write(packet)
+        self.wfile.flush()
+
     def send_static(self, request_path: str) -> None:
         if request_path == "/":
             request_path = "/index.html"
@@ -729,6 +745,8 @@ class LingxiHandler(BaseHTTPRequestHandler):
                 )
             elif path == "/api/chat":
                 self.handle_chat()
+            elif path == "/api/chat/stream":
+                self.handle_chat_stream()
             elif path == "/api/jobs":
                 body = self.read_json_body()
                 job = start_job(str(body.get("command", "")))
@@ -845,6 +863,166 @@ class LingxiHandler(BaseHTTPRequestHandler):
             },
             status=200 if code == 0 else 500,
         )
+
+    def handle_chat_stream(self) -> None:
+        body = self.read_json_body()
+        user_text = str(body.get("user_text", "")).strip()
+        if not user_text:
+            self.write_error(400, "user_text is required")
+            return
+
+        scene = str(body.get("scene", "家庭陪伴"))
+        emotion = normalize_emotion(body.get("emotion")) if body.get("emotion") else infer_emotion(user_text)
+        window = int(body.get("window", 3))
+        no_save = bool(body.get("no_save", False))
+        disable_safety = bool(body.get("disable_safety", False))
+        mode = str(body.get("mode", "generate"))
+
+        self.write_sse_headers()
+        self.send_sse("stage", {"key": "receive", "title": "接收用户输入", "detail": f"{len(user_text)} 字"})
+        self.send_sse("stage", {"key": "emotion", "title": "情绪识别", "detail": emotion})
+
+        safety = check_safety(user_text)
+        safety_payload = {
+            "triggered": safety.triggered,
+            "level": safety.level,
+            "categories": safety.categories,
+            "matched_keywords": safety.matched_keywords,
+        }
+        self.send_sse("safety", safety_payload)
+        if safety.triggered and not disable_safety:
+            reply = safety.reply
+            if not no_save:
+                self.send_sse("stage", {"key": "memory_write", "title": "写入安全边界记忆", "detail": safety.level})
+                append_memory(
+                    ROOT / "data/memory/memory.json",
+                    emotion="危机" if safety.level == "high" else "焦虑",
+                    user_text=user_text,
+                    robot_reply=reply,
+                )
+            self.send_sse("final", {
+                "mode": "safety",
+                "emotion": "危机" if safety.level == "high" else "焦虑",
+                "reply": reply,
+                "records": load_memory(ROOT / "data/memory/memory.json"),
+                "safety": safety_payload,
+            })
+            return
+
+        records = load_memory(ROOT / "data/memory/memory.json")
+        self.send_sse("stage", {"key": "memory_read", "title": "检索短期记忆", "detail": f"最近 {min(window, len(records))} / 共 {len(records)} 条"})
+        prompt = build_memory_prompt(
+            user_text=user_text,
+            scene=scene,
+            current_emotion=emotion,
+            records=records,
+            window=window,
+        )
+        self.send_sse("prompt", {"emotion": emotion, "prompt": prompt})
+        self.send_sse("stage", {"key": "prompt", "title": "构建 Prompt", "detail": f"{len(prompt)} 字"})
+
+        if mode == "dry":
+            self.send_sse("final", {"mode": "dry", "emotion": emotion, "reply": prompt, "prompt": prompt, "records": records})
+            return
+
+        if mode == "manual":
+            reply = str(body.get("manual_reply", "")).strip()
+            if not reply:
+                self.send_sse("error", {"error": "manual_reply is required for manual mode"})
+                return
+            if not no_save:
+                self.send_sse("stage", {"key": "memory_write", "title": "写入手动回复记忆", "detail": emotion})
+                append_memory(ROOT / "data/memory/memory.json", emotion=emotion, user_text=user_text, robot_reply=reply)
+            self.send_sse("final", {
+                "mode": "manual",
+                "emotion": emotion,
+                "prompt": prompt,
+                "reply": reply,
+                "records": load_memory(ROOT / "data/memory/memory.json"),
+            })
+            return
+
+        adapter = str(body.get("adapter", "")).strip()
+        command = [
+            "python",
+            "-u",
+            "scripts/memory_chat.py",
+            "--stream-jsonl",
+            "--user",
+            user_text,
+            "--scene",
+            scene,
+            "--emotion",
+            emotion,
+            "--window",
+            str(window),
+            "--max-new-tokens",
+            str(int(body.get("max_new_tokens", 220))),
+        ]
+        if adapter:
+            command.extend(["--adapter", adapter])
+        if no_save:
+            command.append("--no-save")
+        if disable_safety:
+            command.append("--disable-safety")
+
+        self.send_sse("stage", {"key": "subprocess", "title": "启动推理进程", "detail": "stream-jsonl"})
+        proc = subprocess.Popen(
+            command,
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+        stderr_queue: queue.Queue[str] = queue.Queue()
+
+        def read_stderr() -> None:
+            assert proc.stderr is not None
+            for err_line in proc.stderr:
+                stderr_queue.put(err_line.rstrip())
+
+        threading.Thread(target=read_stderr, daemon=True).start()
+
+        reply_chunks: list[str] = []
+        final_payload: dict[str, Any] | None = None
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.strip()
+            while not stderr_queue.empty():
+                self.send_sse("diagnostic", {"text": stderr_queue.get()})
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                self.send_sse("diagnostic", {"text": line})
+                continue
+            event = str(payload.pop("event", "message"))
+            if event == "token":
+                chunk = str(payload.get("text", ""))
+                reply_chunks.append(chunk)
+            elif event == "final":
+                final_payload = payload
+            self.send_sse(event, payload)
+
+        returncode = proc.wait()
+        while not stderr_queue.empty():
+            self.send_sse("diagnostic", {"text": stderr_queue.get()})
+        if returncode != 0:
+            self.send_sse("error", {"error": f"推理进程退出码 {returncode}", "returncode": returncode})
+            return
+
+        reply = str((final_payload or {}).get("reply") or "".join(reply_chunks)).strip()
+        self.send_sse("stage", {"key": "memory_refresh", "title": "刷新记忆状态", "detail": "完成"})
+        self.send_sse("final", {
+            "mode": "generate",
+            "emotion": emotion,
+            "prompt": prompt,
+            "reply": reply,
+            "returncode": returncode,
+            "records": load_memory(ROOT / "data/memory/memory.json"),
+        })
 
     def do_DELETE(self) -> None:
         parsed = urlparse(self.path)
