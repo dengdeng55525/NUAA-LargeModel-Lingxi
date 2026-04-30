@@ -151,6 +151,18 @@ select:disabled {
   background: var(--bg);
 }
 
+body[data-active-view="chat"] {
+  overflow: hidden;
+}
+
+body[data-active-view="chat"] .workspace {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100dvh;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+
 .topbar {
   min-height: 64px;
   position: sticky;
@@ -208,6 +220,11 @@ select:disabled {
 
 .view.active {
   display: block;
+}
+
+body[data-active-view="chat"] #chat.view.active {
+  min-height: 0;
+  overflow: hidden;
 }
 
 .grid {
@@ -639,9 +656,9 @@ pre {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
   gap: 0;
-  height: calc(100dvh - 106px);
+  height: 100%;
   min-height: 0;
-  max-height: calc(100dvh - 106px);
+  max-height: 100%;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
@@ -726,8 +743,8 @@ pre {
 }
 
 .chat-main {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   background: var(--surface);
   border: 0;
   border-radius: 0;
@@ -738,6 +755,7 @@ pre {
 
 .chat-header {
   min-height: 64px;
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -768,14 +786,17 @@ pre {
 }
 
 .chat-safety {
+  flex: none;
   width: min(var(--chat-width), calc(100% - 40px));
   margin: 14px auto 0;
 }
 
 .chat-thread {
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   padding: 28px 20px 28px;
+  scroll-padding-bottom: 28px;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -939,6 +960,7 @@ pre {
 }
 
 .chat-bottom {
+  flex: none;
   border-top: 1px solid var(--line);
   background: var(--surface);
   padding: 12px 20px 18px;
@@ -1203,8 +1225,8 @@ pre {
 
   .chatgpt-shell {
     grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
-    height: calc(100dvh - 106px);
-    max-height: calc(100dvh - 106px);
+    height: 100%;
+    max-height: 100%;
   }
 
   .chat-side,
@@ -1242,6 +1264,13 @@ pre {
     min-height: 100dvh;
     overflow: visible;
     padding: 0 14px 14px;
+  }
+
+  body[data-active-view="chat"] .workspace {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    padding-bottom: 14px;
   }
 
   .topbar {

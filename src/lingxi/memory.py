@@ -9,9 +9,17 @@ from .io_utils import resolve_path
 from .safety import is_high_risk
 
 
+EMOTION_LABELS = ("危机", "焦虑", "悲伤", "孤独", "愤怒", "疲惫", "开心", "平静")
+
 EMOTION_ALIASES = {
     "neutral": "平静",
     "calm": "平静",
+    "happy": "开心",
+    "happiness": "开心",
+    "joy": "开心",
+    "joyful": "开心",
+    "like": "开心",
+    "positive": "开心",
     "sad": "悲伤",
     "sadness": "悲伤",
     "depressed": "悲伤",
@@ -35,7 +43,7 @@ def normalize_emotion(value: str | None) -> str:
     lower = text.lower()
     if lower in EMOTION_ALIASES:
         return EMOTION_ALIASES[lower]
-    for emotion in ("危机", "焦虑", "悲伤", "孤独", "愤怒", "疲惫", "平静"):
+    for emotion in EMOTION_LABELS:
         if emotion in text:
             return emotion
     return "平静"
@@ -116,12 +124,16 @@ def emotion_trend(records: list[dict[str, Any]], current_emotion: str, window: i
     current = normalize_emotion(current_emotion)
     if current == "危机":
         return "当前表达包含安全风险信号，需要优先关注用户安全，并建议联系身边可信任的人或当地紧急支持。"
+    if current == "开心":
+        if emotions and emotions[-1] != current:
+            return "当前表达是正向分享，历史情绪只作为背景；回复应回应当前开心，不要延续上一轮压力或负面话题。"
+        return "当前表达偏正向，可以自然回应这份开心，并邀请用户继续分享。"
     if len(emotions) >= 2 and emotions[-2:] == [current, current] and current != "平静":
         return f"最近多轮持续出现{current}情绪，回复应更温和，减少追问，先稳定情绪。"
     if emotions and emotions[-1] == current and current != "平静":
         return f"上一轮和当前都偏向{current}，需要承接前文感受，避免像第一次听到一样重新开始。"
     if emotions:
-        return "历史情绪有变化，回复应结合当前表达，不机械延续过去判断。"
+        return "历史情绪有变化，当前表达优先；回复应结合当前表达，不机械延续上一轮话题或情绪判断。"
     return "暂无历史情绪，仅根据当前表达进行陪伴回应。"
 
 
@@ -134,8 +146,7 @@ def format_recent_records(records: list[dict[str, Any]], window: int = 3) -> str
         round_id = record.get("round", "?")
         emotion = normalize_emotion(str(record.get("emotion", "")))
         user_text = str(record.get("user_text", "")).strip()
-        reply = str(record.get("robot_reply", "")).strip()
-        lines.append(f"第{round_id}轮：情绪={emotion}；用户={user_text}；回复={reply}")
+        lines.append(f"第{round_id}轮：情绪={emotion}；用户表达={user_text}")
     return "\n".join(lines)
 
 
@@ -155,8 +166,9 @@ def build_memory_prompt(
             f"情绪趋势：{emotion_trend(records, emotion, window)}",
             f"用户表达：{user_text}",
             f"场景：{scene}",
+            "优先级：当前用户表达最高；短期记忆只作为背景，不能覆盖或改写当前表达。",
             "",
-            "最近记忆：",
+            "最近记忆（仅包含历史用户表达和情绪，不包含历史回复原文）：",
             format_recent_records(records, window),
             "",
             "请结合短期情绪记忆，生成一段温和、尊重、非评判的家庭陪伴回复。",

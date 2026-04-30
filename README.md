@@ -116,7 +116,7 @@ python scripts/infer_compare.py \
 
 ## 短期情绪记忆模块
 
-项目加入了轻量短期情绪记忆模块，默认文件为 `data/memory/memory.json`。每条记忆包含轮次、情绪、用户表达和助手回复。生成回复前，系统会读取最近 3 轮记忆，把历史情绪趋势拼接到当前 prompt 中。
+项目加入了轻量短期情绪记忆模块，默认文件为 `data/memory/memory.json`。每条记忆包含轮次、情绪、用户表达和助手回复。生成回复前，系统会读取最近 3 轮记忆，把历史情绪趋势和历史用户表达拼接到当前 prompt 中；历史助手回复只供前端展示，不再拼接进模型 prompt，避免旧回复污染当前回答。
 
 `data/memory/memory.json` 属于本地运行时状态，可能包含用户对话内容，不提交到 Git。仓库只保留 `data/memory/memory.example.json` 作为格式示例。
 

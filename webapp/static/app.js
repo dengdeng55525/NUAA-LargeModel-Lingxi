@@ -71,6 +71,7 @@ async function api(path, options = {}) {
 }
 
 function setView(name) {
+  document.body.dataset.activeView = name;
   $$(".nav-item").forEach((btn) => btn.classList.toggle("active", btn.dataset.view === name));
   $$(".view").forEach((view) => view.classList.toggle("active", view.id === name));
   const label = document.querySelector(`.nav-item[data-view="${name}"] span:last-child`)?.textContent || "总览";
@@ -269,6 +270,7 @@ function emotionClass(emotion) {
     孤独: "lonely",
     愤怒: "angry",
     疲惫: "tired",
+    开心: "happy",
     危机: "crisis",
   };
   return map[emotion] || "calm";
@@ -300,7 +302,9 @@ function renderChatThread() {
         </div>`;
     })
     .join("");
-  thread.scrollTop = thread.scrollHeight;
+  requestAnimationFrame(() => {
+    thread.scrollTop = thread.scrollHeight;
+  });
 }
 
 function renderProcessStages(stages, streaming) {
@@ -464,9 +468,10 @@ function drawMemoryCanvas(records) {
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, w, h);
 
-  const emotions = ["平静", "疲惫", "孤独", "悲伤", "焦虑", "愤怒", "危机"];
+  const emotions = ["平静", "开心", "疲惫", "孤独", "悲伤", "焦虑", "愤怒", "危机"];
   const colors = {
     平静: "#168244",
+    开心: "#c58a00",
     疲惫: "#8e8ea0",
     孤独: "#2f6f9f",
     悲伤: "#4f6fb3",

@@ -52,7 +52,7 @@ def normalize_emotion(value: str | None) -> str:
         return "平静"
     text = str(value).strip()
     mapping = {
-        "happy": "平静",
+        "happy": "开心",
         "neutral": "平静",
         "sad": "悲伤",
         "sadness": "悲伤",
@@ -62,8 +62,8 @@ def normalize_emotion(value: str | None) -> str:
         "anxiety": "焦虑",
         "surprise": "平静",
         "disgust": "愤怒",
-        "like": "平静",
-        "happiness": "平静",
+        "like": "开心",
+        "happiness": "开心",
         "depress": "悲伤",
         "depression": "悲伤",
     }
